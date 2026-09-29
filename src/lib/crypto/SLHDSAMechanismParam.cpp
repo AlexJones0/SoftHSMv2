@@ -20,12 +20,14 @@
 SLHDSAMechanismParam::SLHDSAMechanismParam()
 {
 	this->hedgeType = Hedge::HEDGE_PREFERRED;
+	this->hashDigestLen = 0;
 }
 
 /** \brief SLHDSAMechanismParam */
 SLHDSAMechanismParam::SLHDSAMechanismParam(Hedge::Type hedgeType)
 {
 	this->hedgeType = hedgeType;
+	this->hashDigestLen = 0;
 }
 
 /** \brief SLHDSAMechanismParam */
@@ -33,6 +35,24 @@ SLHDSAMechanismParam::SLHDSAMechanismParam(Hedge::Type hedgeType, const ByteStri
 {
 	this->hedgeType = hedgeType;
 	this->additionalContext = additionalContext;
+	this->hashDigestLen = 0;
+}
+
+/** \brief SLHDSAMechanismParam */
+SLHDSAMechanismParam::SLHDSAMechanismParam(Hedge::Type hedgeType, const ByteString& hashOid, size_t hashDigestLen)
+{
+	this->hedgeType = hedgeType;
+	this->hashOid = hashOid;
+	this->hashDigestLen = hashDigestLen;
+}
+
+/** \brief SLHDSAMechanismParam */
+SLHDSAMechanismParam::SLHDSAMechanismParam(Hedge::Type hedgeType, const ByteString& additionalContext, const ByteString& hashOid, size_t hashDigestLen)
+{
+	this->hedgeType = hedgeType;
+	this->additionalContext = additionalContext;
+	this->hashOid = hashOid;
+	this->hashDigestLen = hashDigestLen;
 }
 
 // Set the type

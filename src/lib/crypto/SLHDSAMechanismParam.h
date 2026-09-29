@@ -27,6 +27,10 @@ public:
 	Hedge::Type hedgeType;
 	/** \brief Additional Context */
 	ByteString additionalContext;
+	/** \brief The DER-encoded OID of the pre-hash algorithm, if applicable (otherwise empty). */
+	ByteString hashOid;
+	/** \brief The digest length expected for the given pre-hash algorithm, in bytes, if applicable. */
+	size_t hashDigestLen;
 
 	/** \brief The type */
 	static const char* type;
@@ -39,6 +43,12 @@ public:
 
 	/** \brief Constructor with Hedge Type and Additional Context */
 	SLHDSAMechanismParam(Hedge::Type hedgeType, const ByteString& additionalContext);
+
+	/** \brief Constructor with Hedge Type and Pre-Hash OID and Digest Length. */
+	SLHDSAMechanismParam(Hedge::Type hedgeType, const ByteString& hashOid, size_t hashDigestLen);
+
+	/** \brief Constructor with Hedge Type, Additional Context and the Pre-Hash OID and Digest Length*/
+	SLHDSAMechanismParam(Hedge::Type hedgeType, const ByteString& additionalContext, const ByteString& hashOid, size_t hashDigestLen);
 
 	/** \brief Clone */
 	virtual SLHDSAMechanismParam* clone() const override;
