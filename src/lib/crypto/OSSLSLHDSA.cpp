@@ -27,6 +27,70 @@
 #include <openssl/err.h>
 #include <string.h>
 
+namespace Encoding
+{
+	// Tell OpenSSL not to encode the message itself, and instead let us do it:
+	//   "Setting it to 0 does not encode the message, which is used for testing,
+	//    but can also be used for 'Pre Hash SLH-DSA Signature Generation'"
+	const int OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING_RAW = 0;
+
+	const unsigned char SLH_DSA_PRE_HASH_DOMAIN_SEPARATOR = 0x01;
+
+	/** \brief Build the HashSLH-DSA message encoding:
+	 * 		M' = 01 || ctx.len || ctx || prf.oid || M
+	 * Where 01 is the pre-hash domain separator, ctx is the (default empty)
+	 * context string, prf is the pre-hash function and prf.oid is that
+	 * function's OID, and `M` is the pre-hashed message. */
+	bool encodeHashSlhDsaMessage(const SLHDSAMechanismParam *param, const ByteString& digest, ByteString& encoded)
+	{
+		const ByteString& context = param->additionalContext;
+		const size_t contextSize = context.size();
+		const size_t hashOidSize = param->hashOid.size();
+		const size_t digestSize = digest.size();
+
+		if (contextSize > 255)
+		{
+			ERROR_MSG("Invalid parameters, context length > 255");
+			return false;
+		}
+
+		if (hashOidSize == 0)
+		{
+			ERROR_MSG("Invalid parameters, empty hash OID");
+			return false;
+		}
+
+		if (param->hashDigestLen != 0 && digestSize != param->hashDigestLen)
+		{
+			ERROR_MSG(
+				"SLH-DSA pre-hashed message is %zu bytes, but %zu were expected based on "
+				"the specified pre-hash function.",
+				digest.size(), param->hashDigestLen
+			);
+			return false;
+		}
+
+		// 01 / ctx.len / ctx / prf / M
+		encoded.resize(1 + 1 + contextSize + hashOidSize + digestSize);
+		unsigned char* p = &encoded[0];
+		*p++ = SLH_DSA_PRE_HASH_DOMAIN_SEPARATOR;
+		*p++ = (unsigned char)contextSize;
+		if (contextSize > 0)
+		{
+			memcpy(p, context.const_byte_str(), contextSize);
+			p += contextSize;
+		}
+		memcpy(p, param->hashOid.const_byte_str(), hashOidSize);
+		p += hashOidSize;
+		if (digestSize > 0)
+		{
+			memcpy(p, digest.const_byte_str(), digestSize);
+		}
+
+		return true;
+	}
+}
+
 
 // Signing functions
 /** \brief sign */
@@ -75,16 +139,31 @@ bool OSSLSLHDSA::sign(PrivateKey *privateKey, const ByteString &dataToSign,
 	// Perform the signature operation
 	size_t len = 0;
 
-	OSSL_PARAM params[4], *p = params;
+	OSSL_PARAM params[5], *p = params;
 
 	int local_deterministic = 1;
 	int local_random = 0;
+	int local_encode_raw = Encoding::OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING_RAW;
 	const SLHDSAMechanismParam* slhdsaSignatureParam = dynamic_cast<const SLHDSAMechanismParam*>(mechanismParam);
 	ByteString context;
+	ByteString encodedMessage;
+	// Default (Pure SLH-DSA operation) just passes the message directly.
+	const ByteString* message = &dataToSign;
 	if (slhdsaSignatureParam != NULL)
 	{
-		Hedge::Type type = slhdsaSignatureParam->hedgeType;
-		if (slhdsaSignatureParam->additionalContext.size() > 0)
+		// If using Pure SLH-DSA, OpenSSL handles the message encoding, so we pass it the
+		// context string. If using HashSLH-DSA, the message encoding is instead built here
+		// to prepend the pre-hash OID along with the domain separator and context string.
+		if (slhdsaSignatureParam->hashOid.size() > 0)
+		{
+			if (!Encoding::encodeHashSlhDsaMessage(slhdsaSignatureParam, dataToSign, encodedMessage))
+			{
+				return false;
+			}
+			message = &encodedMessage;
+			*p++ = OSSL_PARAM_construct_int(OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING, &local_encode_raw);
+		}
+		else if (slhdsaSignatureParam->additionalContext.size() > 0)
 		{
 			context = slhdsaSignatureParam->additionalContext;
 			size_t contextSize = context.size();
@@ -95,6 +174,8 @@ bool OSSLSLHDSA::sign(PrivateKey *privateKey, const ByteString &dataToSign,
 			}
 			*p++ = OSSL_PARAM_construct_octet_string(OSSL_SIGNATURE_PARAM_CONTEXT_STRING, context.byte_str(), contextSize);
 		}
+
+		Hedge::Type type = slhdsaSignatureParam->hedgeType;
 		switch (type)
 		{
 		case Hedge::Type::DETERMINISTIC_REQUIRED:
@@ -148,7 +229,7 @@ bool OSSLSLHDSA::sign(PrivateKey *privateKey, const ByteString &dataToSign,
 		return false;
 	}
 	/* Calculate the required size for the signature by passing a NULL buffer. */
-	if (EVP_PKEY_sign(sctx, NULL, &len, dataToSign.const_byte_str(), dataToSign.size()) <= 0)
+	if (EVP_PKEY_sign(sctx, NULL, &len, message->const_byte_str(), message->size()) <= 0)
 	{
 		ERROR_MSG("SLH-DSA sign size query failed (0x%08lX)", ERR_get_error());
 		EVP_SIGNATURE_free(sig_alg);
@@ -156,7 +237,7 @@ bool OSSLSLHDSA::sign(PrivateKey *privateKey, const ByteString &dataToSign,
 		return false;
 	}
 	signature.resize(len);
-	if (EVP_PKEY_sign(sctx, &signature[0], &len, dataToSign.const_byte_str(), dataToSign.size()) <= 0)
+	if (EVP_PKEY_sign(sctx, &signature[0], &len, message->const_byte_str(), message->size()) <= 0)
 	{
 		ERROR_MSG("SLH-DSA sign failed (0x%08lX)", ERR_get_error());
 		EVP_SIGNATURE_free(sig_alg);
@@ -298,11 +379,28 @@ bool OSSLSLHDSA::verify(PublicKey *publicKey, const ByteString &originalData,
 	}
 
 	OSSL_PARAM params[3], *p = params;
+
+	int local_encode_raw = Encoding::OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING_RAW;
 	const SLHDSAMechanismParam* slhdsaSignatureParam = dynamic_cast<const SLHDSAMechanismParam*>(mechanismParam);
 	ByteString context;
+	ByteString encodedMessage;
+	// Default (Pure SLH-DSA operation) just passes the message directly.
+	const ByteString* message = &originalData;
 	if (slhdsaSignatureParam != NULL)
 	{
-		if (slhdsaSignatureParam->additionalContext.size() > 0)
+		// If using Pure SLH-DSA, OpenSSL handles the message encoding, so we pass it the
+		// context string. If using HashSLH-DSA, the message encoding is instead built here
+		// to prepend the pre-hash OID along with the domain separator and context string.
+		if (slhdsaSignatureParam->hashOid.size() > 0)
+		{
+			if (!Encoding::encodeHashSlhDsaMessage(slhdsaSignatureParam, originalData, encodedMessage))
+			{
+				return false;
+			}
+			message = &encodedMessage;
+			*p++ = OSSL_PARAM_construct_int(OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING, &local_encode_raw);
+		}
+		else if (slhdsaSignatureParam->additionalContext.size() > 0)
 		{
 			context = slhdsaSignatureParam->additionalContext;
 			size_t contextSize = context.size();
@@ -362,7 +460,7 @@ bool OSSLSLHDSA::verify(PublicKey *publicKey, const ByteString &originalData,
 		return false;
 	}
 	int verifyRV = EVP_PKEY_verify(vctx, signature.const_byte_str(), signature.size(),
-	                               originalData.const_byte_str(), originalData.size());
+	                               message->const_byte_str(), message->size());
 	EVP_PKEY_CTX_free(vctx);
 	EVP_SIGNATURE_free(sig_alg);
 	if (verifyRV != 1)
