@@ -1543,6 +1543,20 @@ void SignVerifyTests::testSignInitWrongKeyType()
 	}
 #endif
 
+#ifdef WITH_SLH_DSA
+	// SLH-DSA mechanisms with RSA key
+	{
+		CK_MECHANISM mechanism = { CKM_SLH_DSA, NULL_PTR, 0 };
+		rv = CRYPTOKI_F_PTR( C_SignInit(hSession, &mechanism, hRsaPriv) );
+		CPPUNIT_ASSERT(rv == CKR_KEY_TYPE_INCONSISTENT);
+
+		CK_HASH_SIGN_ADDITIONAL_CONTEXT params = { CKH_HEDGE_PREFERRED, NULL, 0, CKM_SHA256 };
+		mechanism = { CKM_HASH_SLH_DSA, &params, sizeof(params) };
+		rv = CRYPTOKI_F_PTR( C_SignInit(hSession, &mechanism, hRsaPriv) );
+		CPPUNIT_ASSERT(rv == CKR_KEY_TYPE_INCONSISTENT);
+	}
+#endif
+
 	C_Logout(hSession);
 	C_CloseSession(hSession);
 }
@@ -1632,6 +1646,20 @@ void SignVerifyTests::testVerifyInitWrongKeyType()
 	// ML-DSA mechanism with RSA key
 	{
 		CK_MECHANISM mechanism = { CKM_ML_DSA, NULL_PTR, 0 };
+		rv = CRYPTOKI_F_PTR( C_VerifyInit(hSession, &mechanism, hRsaPub) );
+		CPPUNIT_ASSERT(rv == CKR_KEY_TYPE_INCONSISTENT);
+	}
+#endif
+
+#ifdef WITH_SLH_DSA
+	// SLH-DSA mechanisms with RSA key
+	{
+		CK_MECHANISM mechanism = { CKM_SLH_DSA, NULL_PTR, 0 };
+		rv = CRYPTOKI_F_PTR( C_VerifyInit(hSession, &mechanism, hRsaPub) );
+		CPPUNIT_ASSERT(rv == CKR_KEY_TYPE_INCONSISTENT);
+
+		CK_HASH_SIGN_ADDITIONAL_CONTEXT params = { CKH_HEDGE_PREFERRED, NULL, 0, CKM_SHA256 };
+		mechanism = { CKM_HASH_SLH_DSA, &params, sizeof(params) };
 		rv = CRYPTOKI_F_PTR( C_VerifyInit(hSession, &mechanism, hRsaPub) );
 		CPPUNIT_ASSERT(rv == CKR_KEY_TYPE_INCONSISTENT);
 	}
