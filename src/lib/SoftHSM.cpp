@@ -884,10 +884,13 @@ void SoftHSM::prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE
 #ifdef WITH_ML_DSA
 	t["CKM_ML_DSA_KEY_PAIR_GEN"] = CKM_ML_DSA_KEY_PAIR_GEN;
 	t["CKM_ML_DSA"]			= CKM_ML_DSA;
+	/* TODO: all variants of CKM_HASH_ML_DSA* are not yet supported. */
 #endif
 #ifdef WITH_SLH_DSA
 	t["CKM_SLH_DSA_KEY_PAIR_GEN"] = CKM_SLH_DSA_KEY_PAIR_GEN;
 	t["CKM_SLH_DSA"]		= CKM_SLH_DSA;
+	t["CKM_HASH_SLH_DSA"]		= CKM_HASH_SLH_DSA;
+	/* TODO: the pre-hashed CKM_HASH_SLH_DSA_* variants are not yet supported. */
 #endif
 #ifdef WITH_ML_KEM
 	t["CKM_ML_KEM_KEY_PAIR_GEN"] = CKM_ML_KEM_KEY_PAIR_GEN;
@@ -1446,6 +1449,7 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 			pInfo->flags = CKF_GENERATE_KEY_PAIR;
 			break;
 		case CKM_SLH_DSA:
+		case CKM_HASH_SLH_DSA:
 			pInfo->ulMinKeySize = slhdsaMinSize;
 			pInfo->ulMaxKeySize = slhdsaMaxSize;
 			pInfo->flags = CKF_SIGN | CKF_VERIFY;
@@ -4687,20 +4691,66 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 					return CKR_ARGUMENTS_BAD;
 				}
 				if (ckSignAdditionalContext->ulContextLen > 0) {
-					if (ckSignAdditionalContext->pContext == NULL_PTR) {
-						ERROR_MSG("Invalid parameters");
-						return CKR_ARGUMENTS_BAD;
-					}
-					if (ckSignAdditionalContext->ulContextLen > 255) {
+					if (ckSignAdditionalContext->pContext == NULL_PTR ||
+					    ckSignAdditionalContext->ulContextLen > 255)
+					{
 						ERROR_MSG("Invalid parameters");
 						return CKR_ARGUMENTS_BAD;
 					}
 					slhdsaParam.additionalContext = ByteString(ckSignAdditionalContext->pContext, ckSignAdditionalContext->ulContextLen);
-					DEBUG_MSG("Sign SLHDSA additionalContextLen=%lu, hedgeType=%d", (unsigned long)slhdsaParam.additionalContext.size(), slhdsaParam.hedgeType);
 				}
+				DEBUG_MSG("Sign SLHDSA additionalContextLen=%lu, hedgeType=%d", (unsigned long)slhdsaParam.additionalContext.size(), slhdsaParam.hedgeType);
 				mechanismParam = &slhdsaParam;
 			}
 			break;
+		case CKM_HASH_SLH_DSA:
+		{
+			mechanism = AsymMech::SLHDSA;
+			bAllowMultiPartOp = true;
+			isSLHDSA = true;
+
+			// The Pre-hashed SLH-DSA variants requires explicit parameters bundling
+			// the hash/XOF algorithm's OID, unlike Pure SLH-DSA (which can be empty).
+			if (pMechanism->pParameter == NULL_PTR ||
+				pMechanism->ulParameterLen != sizeof(CK_HASH_SIGN_ADDITIONAL_CONTEXT))
+			{
+				ERROR_MSG("Invalid parameters");
+				return CKR_ARGUMENTS_BAD;
+			}
+
+			CK_HASH_SIGN_ADDITIONAL_CONTEXT_PTR ckHashSignAdditionalContext = (CK_HASH_SIGN_ADDITIONAL_CONTEXT_PTR) pMechanism->pParameter;
+			CK_RV rv = SLHDSAUtil::setHedge(ckHashSignAdditionalContext->hedgeVariant, &slhdsaParam.hedgeType);
+			if (rv != CKR_OK) {
+				return rv;
+			}
+
+			rv = SLHDSAUtil::setHashOid(ckHashSignAdditionalContext->hash, &slhdsaParam.hashOid, &slhdsaParam.hashDigestLen);
+			if (rv != CKR_OK) {
+				return rv;
+			}
+			if (slhdsaParam.hashOid.size() == 0 || slhdsaParam.hashDigestLen == 0) {
+				ERROR_MSG("Invalid parameters");
+				return CKR_ARGUMENTS_BAD;
+			}
+
+			if (ckHashSignAdditionalContext->ulContextLen > 0) {
+				if (ckHashSignAdditionalContext->pContext == NULL_PTR ||
+					ckHashSignAdditionalContext->ulContextLen > 255)
+				{
+					ERROR_MSG("Invalid parameters");
+					return CKR_ARGUMENTS_BAD;
+				}
+				slhdsaParam.additionalContext = ByteString(ckHashSignAdditionalContext->pContext, ckHashSignAdditionalContext->ulContextLen);
+			}
+
+			DEBUG_MSG(
+				"Sign HASH_SLHDSA additionalContextLen=%lu, hedgeType=%d, hash=%lu, digestLen=%zu",
+				(unsigned long)slhdsaParam.additionalContext.size(), slhdsaParam.hedgeType,
+				(unsigned long)ckHashSignAdditionalContext->hash, slhdsaParam.hashDigestLen
+			);
+			mechanismParam = &slhdsaParam;
+			break;
+		}
 #endif
 		default:
 			return CKR_MECHANISM_INVALID;
