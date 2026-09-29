@@ -5896,11 +5896,9 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 					return CKR_ARGUMENTS_BAD;
 				}
 				if (ckSignAdditionalContext->ulContextLen > 0) {
-					if (ckSignAdditionalContext->pContext == NULL_PTR) {
-						ERROR_MSG("Invalid parameters");
-						return CKR_ARGUMENTS_BAD;
-					}
-					if (ckSignAdditionalContext->ulContextLen > 255) {
+					if (ckSignAdditionalContext->pContext == NULL_PTR ||
+					    ckSignAdditionalContext->ulContextLen > 255)
+					{
 						ERROR_MSG("Invalid parameters");
 						return CKR_ARGUMENTS_BAD;
 					}
@@ -5910,6 +5908,54 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 				mechanismParam = &slhdsaParam;
 			}
 			break;
+		case CKM_HASH_SLH_DSA:
+		{
+			mechanism = AsymMech::SLHDSA;
+			bAllowMultiPartOp = true;
+			isSLHDSA = true;
+
+			// The Pre-hashed SLH-DSA variants requires explicit parameters bundling
+			// the hash/XOF algorithm's OID, unlike Pure SLH-DSA (which can be empty).
+			if (pMechanism->pParameter == NULL_PTR ||
+				pMechanism->ulParameterLen != sizeof(CK_HASH_SIGN_ADDITIONAL_CONTEXT))
+			{
+				ERROR_MSG("Invalid parameters");
+				return CKR_ARGUMENTS_BAD;
+			}
+
+			CK_HASH_SIGN_ADDITIONAL_CONTEXT_PTR ckHashSignAdditionalContext = (CK_HASH_SIGN_ADDITIONAL_CONTEXT_PTR) pMechanism->pParameter;
+			CK_RV rv = SLHDSAUtil::setHedge(ckHashSignAdditionalContext->hedgeVariant, &slhdsaParam.hedgeType);
+			if (rv != CKR_OK) {
+				return rv;
+			}
+
+			rv = SLHDSAUtil::setHashOid(ckHashSignAdditionalContext->hash, &slhdsaParam.hashOid, &slhdsaParam.hashDigestLen);
+			if (rv != CKR_OK) {
+				return rv;
+			}
+			if (slhdsaParam.hashOid.size() == 0 || slhdsaParam.hashDigestLen == 0) {
+				ERROR_MSG("Invalid parameters");
+				return CKR_ARGUMENTS_BAD;
+			}
+
+			if (ckHashSignAdditionalContext->ulContextLen > 0) {
+				if (ckHashSignAdditionalContext->pContext == NULL_PTR ||
+					ckHashSignAdditionalContext->ulContextLen > 255)
+				{
+					ERROR_MSG("Invalid parameters");
+					return CKR_ARGUMENTS_BAD;
+				}
+				slhdsaParam.additionalContext = ByteString(ckHashSignAdditionalContext->pContext, ckHashSignAdditionalContext->ulContextLen);
+			}
+
+			DEBUG_MSG(
+				"Verify HASH_SLHDSA additionalContextLen=%lu, hedgeType=%d, hash=%lu, digestLen=%zu",
+				(unsigned long)slhdsaParam.additionalContext.size(), slhdsaParam.hedgeType,
+				(unsigned long)ckHashSignAdditionalContext->hash, slhdsaParam.hashDigestLen
+			);
+			mechanismParam = &slhdsaParam;
+			break;
+		}
 #endif
 		default:
 			return CKR_MECHANISM_INVALID;
