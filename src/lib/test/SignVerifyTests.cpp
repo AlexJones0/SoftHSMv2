@@ -321,7 +321,7 @@ void SignVerifyTests::signVerifySingle(CK_MECHANISM_TYPE mechanismType, CK_SESSI
 {
 	CK_RV rv;
 	CK_MECHANISM mechanism = { mechanismType, param, paramLen };
-	CK_BYTE data[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,0x0C, 0x0D, 0x0F };
+	CK_BYTE data[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F };
 	CK_BYTE signature[64 * 1024];
 	CK_ULONG ulSignatureLen = 0;
 
@@ -352,14 +352,15 @@ void SignVerifyTests::signVerifySingleData(size_t dataSize, CK_MECHANISM_TYPE me
 	CK_RV rv;
 	CK_MECHANISM mechanism = { mechanismType, param, paramLen };
 	CK_BYTE *data = (CK_BYTE*)malloc(dataSize);
-	CK_BYTE signature[1024];
+	CK_BYTE signature[64 * 1024];
 	CK_ULONG ulSignatureLen = 0;
 	unsigned i;
 
 	CPPUNIT_ASSERT(data != NULL);
 
-	for (i=0;i<dataSize;i++)
+	for (i=0;i<dataSize;i++) {
 		data[i] = i;
+	}
 
 	rv = CRYPTOKI_F_PTR( C_SignInit(hSession,&mechanism,hPrivateKey) );
 	CPPUNIT_ASSERT(rv==CKR_OK);
@@ -389,18 +390,18 @@ void SignVerifyTests::signVerifyMulti(CK_MECHANISM_TYPE mechanismType, CK_SESSIO
 {
 	CK_RV rv;
 	CK_MECHANISM mechanism = { mechanismType, param, paramLen };
-	CK_BYTE data[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,0x0C, 0x0D, 0x0F };
+	CK_BYTE data[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F };
 	CK_BYTE signature[64 * 1024];
 	CK_ULONG ulSignatureLen = 0;
 
 	rv = CRYPTOKI_F_PTR( C_SignInit(hSession,&mechanism,hPrivateKey) );
 	CPPUNIT_ASSERT(rv==CKR_OK);
 
-	rv =CRYPTOKI_F_PTR( C_SignUpdate(hSession,data,sizeof(data)) );
+	rv = CRYPTOKI_F_PTR( C_SignUpdate(hSession,data,sizeof(data)) );
 	CPPUNIT_ASSERT(rv==CKR_OK);
 
 	ulSignatureLen = sizeof(signature);
-	rv =CRYPTOKI_F_PTR( C_SignFinal(hSession,signature,&ulSignatureLen) );
+	rv = CRYPTOKI_F_PTR( C_SignFinal(hSession,signature,&ulSignatureLen) );
 	CPPUNIT_ASSERT(rv==CKR_OK);
 
 	rv = CRYPTOKI_F_PTR( C_VerifyInit(hSession,&mechanism,hPublicKey) );
