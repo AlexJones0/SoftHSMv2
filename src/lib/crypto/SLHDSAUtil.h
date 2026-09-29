@@ -40,6 +40,9 @@ public:
 	/** \brief Set the hedge type */
 	static CK_RV setHedge(CK_HEDGE_TYPE inHedgeType, Hedge::Type* outHedgeType);
 
+	/** \brief Set the hash mechanism for HashSLH-DSA */
+	static CK_RV setHashOid(CK_MECHANISM_TYPE inHash, ByteString* outOid, size_t *outDigestLen);
+
 };
 
 #endif // WITH_SLH_DSA

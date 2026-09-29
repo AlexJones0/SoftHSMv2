@@ -201,4 +201,87 @@
 	return CKR_OK;
 }
 
+/** \brief setHashOid */
+/*static*/ CK_RV SLHDSAUtil::setHashOid(CK_MECHANISM_TYPE inHash, ByteString* outOid, size_t* outDigestLen) {
+	if (outOid == NULL)
+	{
+		ERROR_MSG("Invalid parameters, outOid is NULL");
+		return CKR_ARGUMENTS_BAD;
+	}
+	if (outDigestLen == NULL)
+	{
+		ERROR_MSG("Invalid parameters, outDigestLen is NULL");
+		return CKR_ARGUMENTS_BAD;
+	}
+
+	unsigned char lastHashOidArc;
+	size_t digestLen;
+
+	// FIXME: This hard-codes the hash-function OIDs. Ideally, these should be fetched
+	// from the relevant crypto backend (OpenSSL, Botan) instead.
+	switch (inHash)
+	{
+	case CKM_SHA256:
+		lastHashOidArc = 0x01;
+		digestLen = 32;
+		break;
+	case CKM_SHA384:
+		lastHashOidArc = 0x02;
+		digestLen = 48;
+		break;
+	case CKM_SHA512:
+		lastHashOidArc = 0x03;
+		digestLen = 64;
+		break;
+	case CKM_SHA224:
+		lastHashOidArc = 0x04;
+		digestLen = 28;
+		break;
+	case CKM_SHA512_224:
+		lastHashOidArc = 0x05;
+		digestLen = 28;
+		break;
+	case CKM_SHA512_256:
+		lastHashOidArc = 0x06;
+		digestLen = 32;
+		break;
+	case CKM_SHA3_224:
+		lastHashOidArc = 0x07;
+		digestLen = 28;
+		break;
+	case CKM_SHA3_256:
+		lastHashOidArc = 0x08;
+		digestLen = 32;
+		break;
+	case CKM_SHA3_384:
+		lastHashOidArc = 0x09;
+		digestLen = 48;
+		break;
+	case CKM_SHA3_512:
+		lastHashOidArc = 0x0A;
+		digestLen = 64;
+		break;
+	// FIPS 205 supports SHAKE128 and SHAKE256 as approved XOFs algorithms for pre-hashing.
+	// However, PKCS#11 v3.2 only defines mechanisms for SHAKE key derivation, with no
+	// mechanisms for digests. As a result, there is currently no way for a caller to specify
+	// that these pre-hash functions were used. This is planned for support in v3.3 or later.
+	//
+	// See: https://groups.oasis-open.org/discussion/questions-about-the-hash-ml-dsa-signature-and-hash-slh-dsa-signature
+	case CKM_SHAKE_128_KEY_DERIVE:
+	case CKM_SHAKE_256_KEY_DERIVE:
+		ERROR_MSG("SLH-DSA: Invalid parameters, SHAKE pre-hash mechanisms are unsupported in PKCS#11 v3.2.");
+		return CKR_MECHANISM_PARAM_INVALID;
+	default:
+		ERROR_MSG("SLH-DSA: Invalid parameters, unsupported pre-hash mechanism (0x%08lX)", (unsigned long)inHash);
+		return CKR_MECHANISM_PARAM_INVALID;
+	}
+
+	const unsigned char oid[] = { 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, lastHashOidArc };
+	outOid->resize(sizeof(oid));
+	memcpy(&(*outOid)[0], oid, sizeof(oid));
+	*outDigestLen = digestLen;
+
+	return CKR_OK;
+}
+
 #endif
