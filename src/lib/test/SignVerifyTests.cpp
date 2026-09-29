@@ -425,6 +425,52 @@ void SignVerifyTests::signVerifyMulti(CK_MECHANISM_TYPE mechanismType, CK_SESSIO
 	CPPUNIT_ASSERT(rv==CKR_SIGNATURE_INVALID);
 }
 
+void SignVerifyTests::signVerifyMultiData(size_t dataSize, CK_MECHANISM_TYPE mechanismType, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hPublicKey, CK_OBJECT_HANDLE hPrivateKey, CK_VOID_PTR param /* = NULL_PTR */, CK_ULONG paramLen /* = 0 */)
+{
+	CK_RV rv;
+	CK_MECHANISM mechanism = { mechanismType, param, paramLen };
+	CK_BYTE *data = (CK_BYTE*)malloc(dataSize);
+	CK_BYTE signature[64 * 1024];
+	CK_ULONG ulSignatureLen = 0;
+	unsigned i;
+
+	CPPUNIT_ASSERT(data != NULL);
+
+	for (i=0;i<dataSize;i++) {
+		data[i] = i;
+	}
+
+	rv = CRYPTOKI_F_PTR( C_SignInit(hSession,&mechanism,hPrivateKey) );
+	CPPUNIT_ASSERT(rv==CKR_OK);
+
+	rv = CRYPTOKI_F_PTR( C_SignUpdate(hSession,data,dataSize) );
+	CPPUNIT_ASSERT(rv==CKR_OK);
+
+	ulSignatureLen = sizeof(signature);
+	rv = CRYPTOKI_F_PTR( C_SignFinal(hSession,signature,&ulSignatureLen) );
+	CPPUNIT_ASSERT(rv==CKR_OK);
+
+	rv = CRYPTOKI_F_PTR( C_VerifyInit(hSession,&mechanism,hPublicKey) );
+	CPPUNIT_ASSERT(rv==CKR_OK);
+
+	rv = CRYPTOKI_F_PTR( C_VerifyUpdate(hSession,data,dataSize) );
+	CPPUNIT_ASSERT(rv==CKR_OK);
+
+	rv = CRYPTOKI_F_PTR( C_VerifyFinal(hSession,signature,ulSignatureLen) );
+	CPPUNIT_ASSERT(rv==CKR_OK);
+
+	// verify again, but now change the input that is being signed.
+	rv = CRYPTOKI_F_PTR( C_VerifyInit(hSession,&mechanism,hPublicKey) );
+	CPPUNIT_ASSERT(rv==CKR_OK);
+
+	data[0] = 0xff;
+	rv = CRYPTOKI_F_PTR( C_VerifyUpdate(hSession,data,dataSize) );
+	CPPUNIT_ASSERT(rv==CKR_OK);
+
+	rv = CRYPTOKI_F_PTR( C_VerifyFinal(hSession,signature,ulSignatureLen) );
+	CPPUNIT_ASSERT(rv==CKR_SIGNATURE_INVALID);
+}
+
 void SignVerifyTests::testRsaSignVerify()
 {
 	CK_RV rv;
@@ -1017,90 +1063,95 @@ void SignVerifyTests::testSLHDSASignVerify(CK_ULONG parameterSet)
 	CK_OBJECT_HANDLE hPuk = CK_INVALID_HANDLE;
 	CK_OBJECT_HANDLE hPrk = CK_INVALID_HANDLE;
 
-	CK_BYTE data[] = "context-context-context";
-	CK_ULONG dataSize = (CK_ULONG)(sizeof(data) - 1); // exclude trailing NULL
+	CK_BYTE context[] = "context-context-context";
+	CK_ULONG contextSize = (CK_ULONG)(sizeof(context) - 1); // exclude trailing NULL
 
-	CK_SIGN_ADDITIONAL_CONTEXT params[] =
+	CK_SIGN_ADDITIONAL_CONTEXT pureParams[] =
 	{
-		{ CKH_HEDGE_PREFERRED,  NULL,   0  },
-		{ CKH_HEDGE_PREFERRED,  data,   dataSize  },
-		{ CKH_HEDGE_REQUIRED,  NULL,   0  },
-		{ CKH_HEDGE_REQUIRED,  data,   dataSize  },
-		{ CKH_DETERMINISTIC_REQUIRED,  NULL,   0  },
-		{ CKH_DETERMINISTIC_REQUIRED,  data,   dataSize  },
+		{ CKH_HEDGE_PREFERRED, NULL, 0 },
+		{ CKH_HEDGE_PREFERRED, context, contextSize },
+		{ CKH_HEDGE_REQUIRED, NULL, 0 },
+		{ CKH_HEDGE_REQUIRED, context, contextSize },
+		{ CKH_DETERMINISTIC_REQUIRED, NULL, 0 },
+		{ CKH_DETERMINISTIC_REQUIRED, context, contextSize },
 	};
+
+	CK_HASH_SIGN_ADDITIONAL_CONTEXT preHashParams[] =
+	{
+		{ CKH_HEDGE_PREFERRED, NULL, 0, CKM_SHA256 },
+		{ CKH_HEDGE_PREFERRED, context, contextSize, CKM_SHA256 },
+		{ CKH_HEDGE_PREFERRED, NULL, 0, CKM_SHA3_512 },
+		{ CKH_HEDGE_PREFERRED, context, contextSize, CKM_SHA3_512 },
+		{ CKH_HEDGE_REQUIRED, NULL, 0, CKM_SHA224},
+		{ CKH_HEDGE_REQUIRED, context, contextSize, CKM_SHA224},
+		{ CKH_DETERMINISTIC_REQUIRED, NULL, 0, CKM_SHA3_384 },
+		{ CKH_DETERMINISTIC_REQUIRED, context, contextSize, CKM_SHA3_384 },
+	};
+	size_t digestSizes[sizeof(preHashParams)] = { 32, 32, 64, 64, 28, 28, 48, 48 };
 
 	// Public Session keys
 	rv = generateSLHDSA(parameterSet,hSessionRW,IN_SESSION,IS_PUBLIC,IN_SESSION,IS_PUBLIC,hPuk,hPrk);
 	CPPUNIT_ASSERT(rv == CKR_OK);
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk);
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk);
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[0], sizeof(params[0]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[0], sizeof(params[0]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[1], sizeof(params[1]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[1], sizeof(params[1]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[2], sizeof(params[2]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[2], sizeof(params[2]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[3], sizeof(params[3]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[3], sizeof(params[3]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[4], sizeof(params[4]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[4], sizeof(params[4]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[5], sizeof(params[5]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[5], sizeof(params[5]));
+	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk, hPrk);
+	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk, hPrk);
+	for (size_t i = 0; i < sizeof(pureParams) / sizeof(pureParams[0]); i++)
+	{
+		signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk, hPrk, &pureParams[i], sizeof(pureParams[i]));
+		signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk, hPrk, &pureParams[i], sizeof(pureParams[i]));
+	}
+	for (size_t i = 0; i < sizeof(preHashParams) / sizeof(preHashParams[0]); i++)
+	{
+		signVerifySingleData(digestSizes[i], CKM_HASH_SLH_DSA, hSessionRO, hPuk, hPrk, &preHashParams[i], sizeof(preHashParams[i]));
+		signVerifyMultiData(digestSizes[i], CKM_HASH_SLH_DSA, hSessionRO, hPuk, hPrk, &preHashParams[i], sizeof(preHashParams[i]));
+	}
 
 	// Private Session Keys
 	rv = generateSLHDSA(parameterSet,hSessionRW,IN_SESSION,IS_PRIVATE,IN_SESSION,IS_PRIVATE,hPuk,hPrk);
 	CPPUNIT_ASSERT(rv == CKR_OK);
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk);
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk);
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[0], sizeof(params[0]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[0], sizeof(params[0]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[1], sizeof(params[1]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[1], sizeof(params[1]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[2], sizeof(params[2]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[2], sizeof(params[2]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[3], sizeof(params[3]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[3], sizeof(params[3]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[4], sizeof(params[4]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[4], sizeof(params[4]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[5], sizeof(params[5]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[5], sizeof(params[5]));
+	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk, hPrk);
+	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk, hPrk);
+	for (size_t i = 0; i < sizeof(pureParams) / sizeof(pureParams[0]); i++)
+	{
+		signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk, hPrk, &pureParams[i], sizeof(pureParams[i]));
+		signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk, hPrk, &pureParams[i], sizeof(pureParams[i]));
+	}
+	for (size_t i = 0; i < sizeof(preHashParams) / sizeof(preHashParams[0]); i++)
+	{
+		signVerifySingleData(digestSizes[i], CKM_HASH_SLH_DSA, hSessionRO, hPuk, hPrk, &preHashParams[i], sizeof(preHashParams[i]));
+		signVerifyMultiData(digestSizes[i], CKM_HASH_SLH_DSA, hSessionRO, hPuk, hPrk, &preHashParams[i], sizeof(preHashParams[i]));
+	}
 
 	// Public Token Keys
 	rv = generateSLHDSA(parameterSet,hSessionRW,ON_TOKEN,IS_PUBLIC,ON_TOKEN,IS_PUBLIC,hPuk,hPrk);
 	CPPUNIT_ASSERT(rv == CKR_OK);
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk);
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk);
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[0], sizeof(params[0]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[0], sizeof(params[0]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[1], sizeof(params[1]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[1], sizeof(params[1]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[2], sizeof(params[2]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[2], sizeof(params[2]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[3], sizeof(params[3]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[3], sizeof(params[3]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[4], sizeof(params[4]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[4], sizeof(params[4]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[5], sizeof(params[5]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[5], sizeof(params[5]));
+	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk, hPrk);
+	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk, hPrk);
+	for (size_t i = 0; i < sizeof(pureParams) / sizeof(pureParams[0]); i++)
+	{
+		signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk, hPrk, &pureParams[i], sizeof(pureParams[i]));
+		signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk, hPrk, &pureParams[i], sizeof(pureParams[i]));
+	}
+	for (size_t i = 0; i < sizeof(preHashParams) / sizeof(preHashParams[0]); i++)
+	{
+		signVerifySingleData(digestSizes[i], CKM_HASH_SLH_DSA, hSessionRO, hPuk, hPrk, &preHashParams[i], sizeof(preHashParams[i]));
+		signVerifyMultiData(digestSizes[i], CKM_HASH_SLH_DSA, hSessionRO, hPuk, hPrk, &preHashParams[i], sizeof(preHashParams[i]));
+	}
 
 	// Private Token Keys
 	rv = generateSLHDSA(parameterSet, hSessionRW,ON_TOKEN,IS_PRIVATE,ON_TOKEN,IS_PRIVATE,hPuk,hPrk);
 	CPPUNIT_ASSERT(rv == CKR_OK);
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk);
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk);
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[0], sizeof(params[0]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[0], sizeof(params[0]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[1], sizeof(params[1]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[1], sizeof(params[1]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[2], sizeof(params[2]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[2], sizeof(params[2]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[3], sizeof(params[3]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[3], sizeof(params[3]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[4], sizeof(params[4]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[4], sizeof(params[4]));
-	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[5], sizeof(params[5]));
-	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk,hPrk, &params[5], sizeof(params[5]));
+	signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk, hPrk);
+	signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk, hPrk);
+	for (size_t i = 0; i < sizeof(pureParams) / sizeof(pureParams[0]); i++)
+	{
+		signVerifySingle(CKM_SLH_DSA, hSessionRO, hPuk, hPrk, &pureParams[i], sizeof(pureParams[i]));
+		signVerifyMulti(CKM_SLH_DSA, hSessionRO, hPuk, hPrk, &pureParams[i], sizeof(pureParams[i]));
+	}
+	for (size_t i = 0; i < sizeof(preHashParams) / sizeof(preHashParams[0]); i++)
+	{
+		signVerifySingleData(digestSizes[i], CKM_HASH_SLH_DSA, hSessionRO, hPuk, hPrk, &preHashParams[i], sizeof(preHashParams[i]));
+		signVerifyMultiData(digestSizes[i], CKM_HASH_SLH_DSA, hSessionRO, hPuk, hPrk, &preHashParams[i], sizeof(preHashParams[i]));
+	}
 }
 #endif
 
